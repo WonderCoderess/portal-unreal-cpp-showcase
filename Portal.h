@@ -3,16 +3,17 @@
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
 #include "Portal.generated.h"
+
 class UNiagaraComponent;
-
-
 class USceneComponent;
 class UStaticMeshComponent;
 class UBoxComponent;
 class USoundBase;
-class UArrowComponent; //Arrival direction indicator for the portal
+class UArrowComponent;
 class UPrimitiveComponent;
 class USoundBase; 
+class UPortalConfirmationWidget;
+
 
 UCLASS()
 class ARENASHOOTER_API APortal : public AActor
@@ -45,6 +46,20 @@ protected:
 	FTimerHandle TravelTimerHandle;
 
 	bool bTravelInProgress = false;
+
+	// Open the confirmation widget and bind to its events.
+	void StartTravel();
+	void OpenConfirmation();
+	void CloseConfirmation();
+
+	UFUNCTION()
+	void HandleTravelConfirmed();
+
+	UFUNCTION()
+	void HandleTravelCancelled();
+
+	UPROPERTY(Transient)
+	TObjectPtr<UPortalConfirmationWidget> ConfirmationWidget;
 
 public:	
 
@@ -87,5 +102,8 @@ public:
 
 	UPROPERTY(EditAnywhere, Category = "Portal|Effects")
 	TObjectPtr<USoundBase> ActivationSound = nullptr;
+
+	UPROPERTY(EditDefaultsOnly, Category = "Portal|UI")
+	TSubclassOf<UPortalConfirmationWidget> ConfirmationWidgetClass;
 
 };

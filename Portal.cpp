@@ -13,10 +13,14 @@
 #include "GameFramework/PlayerController.h"
 #include "TimerManager.h"
 #include "NiagaraComponent.h"
+#include "PortalConfirmationWidget.h"
+#include "GameFramework/Character.h"
+#include "GameFramework/CharacterMovementComponent.h"
 
 // Define a macro for debugging portal behavior. Set to 1 to enable debug logs, or 0 to disable them.
 #define PORTAL_DEBUG 0
 
+// APortal class implementation
 APortal::APortal()
 {
 	PrimaryActorTick.bCanEverTick = false;
@@ -79,6 +83,7 @@ APortal::APortal()
 
 }
 
+// Called when the actor is constructed or properties are changed in the editor.
 void APortal::OnConstruction(const FTransform& Transform)
 {
 	Super::OnConstruction(Transform);
@@ -86,6 +91,7 @@ void APortal::OnConstruction(const FTransform& Transform)
 	TriggerBox->SetBoxExtent(DetectionSize);
 }
 
+// Called when the game starts or when spawned
 void APortal::BeginPlay()
 {
 	Super::BeginPlay();
@@ -120,6 +126,7 @@ void APortal::BeginPlay()
 
 }
 
+// Handle the player entering the portal trigger area.
 void APortal::OnTriggerBeginOverlap(
 	UPrimitiveComponent* OverlappedComponent,
 	AActor* OtherActor,
@@ -135,10 +142,6 @@ void APortal::OnTriggerBeginOverlap(
 		return;
 	}
 
-	if (bTravelInProgress)
-	{
-		return;
-	}
 
 	UArenaGameInstance* GameInstance =
 		Cast<UArenaGameInstance>(GetGameInstance());
@@ -166,31 +169,10 @@ void APortal::OnTriggerBeginOverlap(
 		return;
 	}
 
-	bTravelInProgress = true;
-
-	ActivationEffect->Activate(true);
-
-#if PORTAL_DEBUG
-	UE_LOG(LogTemp, Warning,
-		TEXT("ACTIVATING PORTAL EFFECT: %s"), *GetName());
-#endif
-
-	if (ActivationSound)
-	{
-		UGameplayStatics::PlaySoundAtLocation(
-			this,
-			ActivationSound,
-			TriggerBox->GetComponentLocation());
-	}
-
-	GetWorldTimerManager().SetTimer(
-		TravelTimerHandle,
-		this,
-		&APortal::CompleteTravel,
-		TravelDelay,
-		false);
+	OpenConfirmation();
 }
 
+// Try to place the player at the arrival point if this portal is the designated arrival portal.
 void APortal::TryPlacePlayerAtArrival()
 {
 	UArenaGameInstance* GameInstance =
@@ -227,6 +209,7 @@ void APortal::TryPlacePlayerAtArrival()
 #endif
 }
 
+// Start the travel process, including delay and level transition.
 void APortal::CompleteTravel()
 {
 	UArenaGameInstance* GameInstance =
@@ -253,4 +236,124 @@ void APortal::CompleteTravel()
 
 	UGameplayStatics::OpenLevelBySoftObjectPtr(
 		this, DestinationLevel);
+}
+
+// Start the travel process, including delay and level transition.
+void APortal::StartTravel()
+{
+	if (bTravelInProgress)
+	{
+		return;
+	}
+
+	bTravelInProgress = true;
+
+	ActivationEffect->Activate(true);
+
+#if PORTAL_DEBUG
+	UE_LOG(LogTemp, Warning,
+		TEXT("ACTIVATING PORTAL EFFECT: %s"), *GetName());
+#endif
+
+	if (ActivationSound)
+	{
+		UGameplayStatics::PlaySoundAtLocation(
+			this,
+			ActivationSound,
+			TriggerBox->GetComponentLocation());
+	}
+
+	GetWorldTimerManager().SetTimer(
+		TravelTimerHandle,
+		this,
+		&APortal::CompleteTravel,
+		TravelDelay,
+		false);
+}
+
+// Open the confirmation widget and bind to its events.
+void APortal::OpenConfirmation()
+{
+	if (IsValid(ConfirmationWidget) || bTravelInProgress)
+	{
+		return;
+	}
+
+	APlayerController* PlayerController =
+		UGameplayStatics::GetPlayerController(this, 0);
+
+	if (!PlayerController || !ConfirmationWidgetClass)
+	{
+		return;
+	}
+
+	ConfirmationWidget = CreateWidget<UPortalConfirmationWidget>(
+		PlayerController, ConfirmationWidgetClass);
+
+	if (!ConfirmationWidget)
+	{
+		return;
+	}
+
+	ConfirmationWidget->OnTravelConfirmed.AddDynamic(
+		this, &APortal::HandleTravelConfirmed);
+
+	ConfirmationWidget->OnTravelCancelled.AddDynamic(
+		this, &APortal::HandleTravelCancelled);
+
+	ConfirmationWidget->AddToViewport(10);
+
+	PlayerController->SetIgnoreMoveInput(true);
+	PlayerController->SetIgnoreLookInput(true);
+
+	if (ACharacter* Character =
+		Cast<ACharacter>(PlayerController->GetPawn()))
+	{
+		Character->GetCharacterMovement()->StopMovementImmediately();
+	}
+
+	FInputModeUIOnly InputMode;
+	InputMode.SetWidgetToFocus(ConfirmationWidget->TakeWidget());
+	PlayerController->SetInputMode(InputMode);
+	PlayerController->SetShowMouseCursor(true);
+}
+
+// Close the confirmation widget and unbind from its events.
+void APortal::CloseConfirmation()
+{
+	if (!IsValid(ConfirmationWidget))
+	{
+		return;
+	}
+
+	APlayerController* PlayerController =
+		ConfirmationWidget->GetOwningPlayer();
+
+	ConfirmationWidget->OnTravelConfirmed.RemoveDynamic(this, &APortal::HandleTravelConfirmed);
+
+	ConfirmationWidget->OnTravelCancelled.RemoveDynamic(this, &APortal::HandleTravelCancelled);
+
+	ConfirmationWidget->RemoveFromParent();
+	ConfirmationWidget = nullptr;
+
+	if (PlayerController)
+	{
+		PlayerController->SetIgnoreMoveInput(false);
+		PlayerController->SetIgnoreLookInput(false);
+
+		FInputModeGameOnly InputMode;
+		PlayerController->SetInputMode(InputMode);
+		PlayerController->SetShowMouseCursor(false);
+	}
+}
+// Handle the travel confirmation event from the widget.
+void APortal::HandleTravelConfirmed()
+{
+	CloseConfirmation();
+	StartTravel();
+}
+// Handle the travel cancellation event from the widget.
+void APortal::HandleTravelCancelled()
+{
+	CloseConfirmation();
 }

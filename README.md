@@ -135,7 +135,7 @@ Each map also has a separate PlayerStart tagged `Player0` for normal starts and 
 ## Current Scope and Future Improvements
 
 - The implementation targets one local player; multiplayer travel and replication are not implemented.
-- UI confirmation and persistent saving of level or player state are not part of this version. GameInstance currently carries the destination ID between levels.
+- UI confirmation was added in the October 28, 2026 update documented below. Persistent saving of level or player state is not implemented; GameInstance currently carries the destination ID between levels.
 - Add arrival timeouts and travel-failure recovery. A pending ID needs to be cleared if its destination portal cannot complete arrival; otherwise, the overlap guard can keep portals inactive. The supplied portal files do not implement this recovery themselves.
 - Keep missing-destination recovery compatible with streamed levels: a portal that has not loaded yet should not be treated as permanently absent.
 - Rename `TryPlacePlayerAtArrival()` to reflect its completion-only role and remove or repurpose the unused `ArrivalPoint` marker.
@@ -161,3 +161,59 @@ Obtain third-party assets from their original listings and follow their applicab
 | `screenshots/screenshot-05-chooseplayerstart.png` | Blueprint spawn selection logic |
 
 This is a **source-code and visual showcase**, not a complete Unreal Engine project. It does not include a `.uproject`, the GameInstance source, Blueprint assets, levels, or external mesh, material, texture, Niagara, and audio assets. Cloning the repository alone does not provide a runnable project; the integration steps describe the additional dependencies.
+
+## Update — October 28, 2026: Portal Travel Confirmation UI
+
+Added a confirmation menu so entering the portal trigger no longer starts travel immediately. The player can choose **Travel** to proceed or **Stay** to remain in the current level.
+
+[▶ Watch the UI confirmation showcase on YouTube](https://youtu.be/ePFBZXJpI28)
+
+### Interaction Flow
+
+1. Entering the portal trigger opens `WBP_PortalConfirmation`.
+2. The menu shows **“Ready to travel through the portal?”** with **Travel** and **Stay** buttons.
+3. While the menu is open, the cursor is visible, input is switched to UI-only mode, and movement and look input are blocked. Character movement is stopped when the menu opens.
+4. **Travel** closes the menu, restores gameplay controls, and calls `StartTravel()`. The Niagara effect and activation sound begin, followed by the configured delay and level transition.
+5. **Stay** closes the menu and restores gameplay controls without starting travel.
+
+The menu is a centered sci-fi panel with a custom background, reusable Common UI buttons, and hover and click sounds. A portal does not create another confirmation window while its current window is open or travel is already in progress. Each widget instance accepts only one decision.
+
+### C++ and Blueprint Integration
+
+- [`PortalConfirmationWidget.h`](PortalConfirmationWidget.h) declares the Blueprint-callable `ConfirmTravel()` and `CancelTravel()` functions and the `OnTravelConfirmed` / `OnTravelCancelled` multicast delegates.
+- [`PortalConfirmationWidget.cpp`](PortalConfirmationWidget.cpp) broadcasts the selected action and uses `bDecisionMade` to prevent repeated decisions from the same widget instance.
+- [`Portal.h`](Portal.h) exposes `ConfirmationWidgetClass` and stores the active widget reference.
+- [`Portal.cpp`](Portal.cpp) creates the widget, binds its delegates, manages input and cursor state, and handles confirmation or cancellation. Activation effects, audio, and the travel timer are grouped in `StartTravel()`.
+- `WBP_PortalConfirmation` inherits from `UPortalConfirmationWidget`. Its reusable `WBP_MenuButton` instances call `ConfirmTravel()` for **Travel** and `CancelTravel()` for **Stay** through their `On Button Base Clicked` events.
+
+### Setup Additions
+
+1. Add the two `PortalConfirmationWidget` source files alongside the updated portal files. Keep `Niagara` and add `UMG` to the module dependencies in `.Build.cs`.
+2. Enable **Common UI** to recreate the reusable buttons shown in this showcase.
+3. Create or reparent `WBP_PortalConfirmation` to `PortalConfirmationWidget`, then connect both button click events as described above.
+4. In `BP_Portal` Class Defaults, set **Portal → UI → Confirmation Widget Class** to `WBP_PortalConfirmation`.
+5. Remove any temporary BeginPlay test that displays the menu automatically. The portal overlap now opens it.
+6. Test both choices: **Stay** must preserve the current level, while **Travel** must start the existing effect, sound, and transition sequence.
+
+The repository remains a source-code and visual showcase. Widget Blueprints, Common UI style assets, imported sounds, and level assets must be configured in an Unreal Engine project separately.
+
+### UI Screenshots
+
+#### Portal Configuration
+
+![BP_Portal with the confirmation widget class assigned](screenshots/screenshotUI-01.png)
+
+#### Widget Layout in the Designer
+
+![Portal confirmation widget with its sci-fi background, question, and Travel and Stay buttons](screenshots/screenshotUI-02.png)
+
+#### Confirmation Menu During Gameplay
+
+![Centered portal confirmation menu displayed over the arena](screenshots/screenshotUI-03.png)
+
+### UI Asset Credits
+
+- **UI graphics:** [UI Pack – Sci-Fi](https://kenney.nl/assets/ui-pack-sci-fi) by **Kenney**.
+- **Button audio:** [Sci-Fi UI Button Sound 019](https://freesound.org/people/crash_358/sounds/615543/) by **crash_358**, and [Scifi Inspect Sound UI or In-Game Notification 01](https://freesound.org/people/lilmati/sounds/657945/) by **lilmati**, available on Freesound. Refer to the original sound pages for their applicable licenses.
+- **Menu background:** AI-generated artwork included as [`portal-ui-background.png`](portal-ui-background.png).
+
